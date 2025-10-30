@@ -1,0 +1,5 @@
+În prima etapa a proiectului, ne-am întâlnit pentru a discuta modul de lucru și ce avem de făcut.
+Am stabilit obiectivele principale și am început să ne documentăm despre platforma Zenodo și 
+despre lista de tool-uri de verificare care trebuie completată. Deocamdată ne-am concentrat pe
+ partea de research si pe organizarea pașilor următori, urmând să căutăm efectiv uneltele 
+relevante si să le adăugăm pe pagina de GitHub.
