@@ -3,6 +3,7 @@ import time
 import re
 import subprocess
 import os
+import glob
 from datetime import datetime
 
 ZENODO_API = "https://zenodo.org/api/records"
@@ -53,33 +54,54 @@ def determine_status(pub_date_str):
     except:
         return "unknown"
 
-def guess_input_formats(description):
-    formats = []
-    text = description.lower()
+def guess_input_formats(title, description, keywords_list):
+    full_text = (str(title) + " " + str(description) + " " + " ".join(keywords_list)).lower()
+    
+    formats = set()
     
     patterns = {
-        " c ": "C", ".c": "C", "c-code": "C",
-        "java": "Java", ".java": "Java", "jml": "JML",
-        "haskell": "Haskell", ".hs": "Haskell",
-        "python": "Python", ".py": "Python",
-        "prolog": "Prolog",
-        "llvm": "LLVM", "bitcode": "LLVM Bitcode",
-        "smt": "SMT-LIB", ".smt2": "SMT-LIB",
-        "boogie": "Boogie", ".bpl": "Boogie",
-        "xml": "XML",
-        "trs": "TRS", "rewrite system": "TRS",
-        "cnf": "CNF",
-        "automata": "Automata",
-        "horn": "Horn Clauses"
+        r'\b(c)\b': "C",
+        r'\b(c\+\+)\b': "C++",
+        r'\.c\b': "C",
+        r'\.i\b': "C (preprocessed)",
+        r'\b(java)\b': "Java",
+        r'\.class\b': "Java Bytecode",
+        r'\b(jar)\b': "Java Bytecode",
+        r'\b(python)\b': "Python",
+        r'\b(llvm)\b': "LLVM Bitcode",
+        r'\b(bitcode)\b': "LLVM Bitcode",
+        r'\b(boogie)\b': "Boogie",
+        r'\b(smt|smt2|smt-lib)\b': "SMT-LIB",
+        r'\b(bpl)\b': "Boogie",
+        r'\b(horn)\b': "Horn Clauses",
+        r'\b(trs)\b': "TRS",
+        r'\b(automata)\b': "Automata",
+        r'\b(onnx)\b': "ONNX",
+        r'\b(vnnlib)\b': "VNNLib",
+        r'\b(verilog)\b': "Verilog",
+        r'\b(vhdl)\b': "VHDL",
+        r'\b(rust)\b': "Rust"
     }
     
-    for key, val in patterns.items():
-        if key in text:
-            formats.append(val)
+    for pattern, label in patterns.items():
+        if re.search(pattern, full_text):
+            formats.add(label)
             
+    if "sv-comp" in full_text or "svcomp" in full_text:
+        formats.add("C")
+    if "test-comp" in full_text:
+        formats.add("C")
+    if "java pathfinder" in full_text or "jpf" in full_text:
+        formats.add("Java")
+    if "vnn-comp" in full_text or "vnncomp" in full_text:
+        formats.add("ONNX")
+    if "qbfeval" in full_text:
+        formats.add("QDIMACS")
+
     if not formats:
         return "-"
-    return ", ".join(sorted(list(set(formats))))
+        
+    return ", ".join(sorted(list(formats)))
 
 def search_zenodo(query, page=1):
     params = {"q": query, "size": PER_PAGE, "page": page, "sort": "mostrecent"}
@@ -116,7 +138,8 @@ def extract_meta(item):
     
     final_tags = ", ".join(matched_categories) if matched_categories else "-"
     status = determine_status(md.get('publication_date', ''))
-    input_formats = guess_input_formats(description)
+    
+    input_formats = guess_input_formats(title, description, zenodo_keywords)
 
     return {
         "id": item.get('id'),
@@ -130,6 +153,22 @@ def extract_meta(item):
         "status": status,
         "input": input_formats
     }
+
+def clean_wiki_directory():
+    print("--- CLEANING OLD WIKI PAGES ---")
+    if not os.path.isdir(WIKI_REPO_PATH):
+        print("Wiki path does not exist yet. Skipping clean.")
+        return
+        
+    files = glob.glob(os.path.join(WIKI_REPO_PATH, "*.md"))
+    deleted_count = 0
+    for f in files:
+        try:
+            os.remove(f)
+            deleted_count += 1
+        except OSError as e:
+            pass      
+    print(f"Deleted {deleted_count} old markdown files.")
 
 def create_individual_page(tool):
     filename = sanitize_filename(tool['title']) + ".md"
@@ -163,6 +202,9 @@ def update_github_wiki():
         print(f"GIT ERROR: {e}")
 
 def main():
+    clean_wiki_directory()
+    os.makedirs(WIKI_REPO_PATH, exist_ok=True)
+    
     found_items = {} 
     print(f"Starting crawl...")
     
@@ -170,7 +212,7 @@ def main():
         search_term = triggers[0] 
         print(f"\n[*] Searching: '{cat_name}'")
         
-        for page in range(1, 3): 
+        for page in range(1, 5): 
             data = search_zenodo(search_term, page)
             if not data or not data.get('hits', {}).get('hits'): break
                 
@@ -182,7 +224,7 @@ def main():
 
                 if meta['url'] not in found_items and meta['tags'] != "-":
                     found_items[meta['url']] = meta
-                    print(f"    + Found: {meta['title'][:30]}...")
+                    print(f"    + Found: {meta['title'][:30]}... [Input: {meta['input']}]")
             time.sleep(1)
 
     sorted_items = sorted(found_items.values(), key=lambda x: x['downloads'], reverse=True)
@@ -190,17 +232,14 @@ def main():
     print(f"\nGenerating {len(sorted_items)} pages...")
     
     main_page_path = os.path.join(WIKI_REPO_PATH, MAIN_PAGE_FILENAME)
-    os.makedirs(WIKI_REPO_PATH, exist_ok=True)
     
     with open(main_page_path, 'w', encoding='utf-8') as f:
         f.write(f"# List of Verification Tools\n\n")
-        
         f.write("| Name | Website | Used for | Input formats | Status |\n")
         f.write("|------|---------|----------|---------------|--------|\n")
         
         for tool in sorted_items:
             page_link = create_individual_page(tool)
-            # Aici am schimbat sintaxa de link pentru a nu strica tabelul
             row = f"| [{tool['title']}]({page_link}) | [link]({tool['url']}) | {tool['tags']} | {tool['input']} | {tool['status']} |\n"
             f.write(row)
 
